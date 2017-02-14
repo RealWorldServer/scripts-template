@@ -1,0 +1,291 @@
+/*
+    Maintened by *Akaki		
+	14-02-2017
+*/
+use uo;
+use os;
+use file;
+
+include "npc/template";			// npc_short(npctemplate)
+include "distro/stringarrays"; 	// array2string(array)
+include "distro/coords"; 		// getLocationName(x, y)
+include "util/dateutils";		// CDateStr(time)
+include "util/bank";			// FindBankBox(char)
+include "util/utility";
+
+set_script_option(SCRIPTOPT_NO_RUNAWAY,1);
+
+const PID := Getpid();
+
+var clock_item, player;
+var thing := dictionary;
+var count := 0, rollback := 0;
+
+program search_with_timer(who, instr)
+
+	// PUBLIC WHO
+	player := who;
+
+	// INSTUCTIONS:
+	if(instr)
+		case(lower(instr))
+			"?":"help":	msg("Description about this program"); return;
+			"rollback":	rollback := 1; // <- NOT SEARCH ONLY CLEANING
+			   default:	msg("Use help / ?"); return;
+		endcase;
+	endif
+
+	// START \o/
+	msg("Search started", 49);
+
+	// CREATE TIMER
+	_TIMER("START");
+
+    for r:= 1 to 2	// SCAN = 1, CLEANING = 2
+
+    	var x, y, z;
+    	for(x:=6144; x>16; x:=x -64) for(y:=16; y<4096; y:=y+64) for(z:=-60; z<=60; z:=z+2)
+
+    		// TIMER UPDATE
+    		_TIMER("UPDATE");
+
+        	//------------------------------//
+    		// 		Search from Merchants 	//
+    		//------------------------------//
+        	foreach me in  ListMobilesNearLocation( x, y, z, 32)
+
+        		if(me.script == "playerMerchant")
+       				var packtype := 0xe75;
+        			if(npc_short(me.npctemplate) == "playervendor2") packtype := 0x966d; endif
+
+        			var storage := find_or_create_storage("PlayerVendorStorage");
+       				var newp := find_or_create_item(storage, me.serial + " 1C", packtype);
+
+       				// MERCHANT STORAGE
+        			foreach itm in EnumerateItemsInContainer( newp )
+       					lookingFor(itm); // main function
+        			endforeach
+       			endif
+
+        	endforeach
+
+        	//-----------------------------------------------//
+        	// Search for things in the World and Containers //
+        	//-----------------------------------------------//
+        	foreach itm_search in ListItemsNearLocation(x, y, z, 32)
+       			
+        		lookingFor(itm_search); // main function
+
+        		if(itm_search.isa(POLCLASS_CONTAINER))
+
+        			// CONTAINERS
+        			foreach itm_search_cont in EnumerateItemsInContainer( itm_search ) 
+        				lookingFor(itm_search_cont); // main function
+        			endforeach
+        		endif
+
+        	endforeach
+
+    		Sleepms(1); 
+
+    	endfor Sleepms(1); endfor Sleepms(1); endfor  
+
+    	//----------------------------------------------------//
+    	// 	Search for an item on all Accounts and in Banks   //
+    	//----------------------------------------------------//
+    	foreach acctname in ListAccounts( )
+    
+    		var acc := FindAccount( acctname );
+
+			for i := 1 to 5 // char slots
+        		var chr := acc.getcharacter(i);
+        		if(chr.ip)
+
+        			// BACKPACK
+        			foreach item_backpack in EnumerateItemsInContainer( chr.backpack ) 
+        				lookingFor(item_backpack); // main function
+    				endforeach
+
+        			// BANK
+    				var bank := FindBankBox( chr ); 
+    				foreach item_bank in EnumerateItemsInContainer( bank )
+    					lookingFor(item_bank);
+    				endforeach
+
+    				// EQUIPPED
+    				foreach item_equip in ListEquippedItems( chr )
+    					lookingFor(item_equip);
+    				endforeach
+
+    				break; // break For
+    			endif
+    			Sleepms(1);
+			endfor
+
+		endforeach
+
+    	// SAVE/PRINT SEARCH DATA
+    	if(count == 0) break; 
+    	elseif(!rollback) 
+
+    		/*
+
+    			-- ENDING. STATISTICS --
+
+    			   EXAMPLE: msg("Found: " +count);
+
+    		*/
+
+    		rollback := 1; // CLEANING
+    	endif
+
+    endfor
+
+	_TIMER("DESTROY");
+    msg("Search complete", 49); 
+    // END
+
+endprogram
+
+// MAIN FUNCTION
+function lookingFor(thing)
+
+	if(thing) // 
+
+		if(!GeTObjProperty(thing,"#finded") AND !rollback)
+
+			SetObjProperty(thing, "#finded", 1);
+
+			/*
+			
+				-- MAIN CODE --
+
+			*/
+
+			count := count + 1;
+
+		else
+			if(rollback == 1) 
+				EraseObjProperty(thing, "#finded");
+			endif
+		endif
+
+	endif
+	
+endfunction
+
+// GET PROCESS
+function killpid(ser)
+
+    var thepid := CInt(ser);
+    var proc := getprocess(CInt(ser));
+    proc.kill();
+
+endfunction
+
+// TIMER | DESTROY -> KILL 'PID' PROCESS AND STOP SEARCH
+function _TIMER(action)
+
+	if(!action) return; 
+				endif
+	var x,y,z;
+	if(TypeOf(action) == "Array")
+		x := cInt(action[2]);
+		y := cInt(action[3]);
+		action := UPPER(action[1]);
+	endif
+
+	case(action)
+		"CREATE":
+			x := player.x; y := player.y; z := player.z;
+			clock_item := CreateItemAtLocation(x, y, z, 0x887A, 1);
+
+			if(clock_item)
+				clock_item.name := "search"; clock_item.movable := 0;
+				SetObjProperty(clock_item, "Timer", ReadGameClock()+15);
+				SetObjProperty(clock_item, "#pid", PID);
+				return clock_item;
+			else
+				killpid(PID); // KILL PROCESS
+			endif
+		"UPDATE":
+			if(!clock_item)
+				killpid(PID); // KILL PROCESS
+			elseif(clock_item && GetObjProperty(clock_item,"Timer") <= ReadGameClock())
+				SetObjProperty(clock_item, "Timer", ReadGameClock()+10);
+				PlayStationaryEffect(clock_item.x, clock_item.y, clock_item.z, 0x377a, 0x1, 0x30, 0);
+				PrintTextAbove(clock_item, getLocationName(x, y));
+				if(rollback) clock_item.color := 0x349; endif
+			endif
+		"DESTROY":
+			if(clock_item)
+				EraseObjProperty(clock_item, "Timer");
+				DestroyItem(clock_item);
+			endif
+	endcase
+
+endfunction
+
+// MESSAGE
+function msg(text, color:=0)
+	SendSysMessage(player, text, 0x3, color);
+endfunction
+
+//----------------------------------//
+// 		ADDITIONAL FUNCTIONS 		//
+//----------------------------------//
+
+// ADD TO DICTIONARY
+/*
+function AddToDictionary(this)
+
+	this := lower(npc_short(this));
+
+	if(thing.exists(this))
+		thing[this] := thing[this] + 1;
+	else
+		thing.insert(this, 1);
+	endif
+
+endfunction
+*/
+/*
+// GET DATA FROM ARRAY
+function GetDictionaryList()
+
+	thing := SortMultiArrayByIndex(thing, 2, 1);
+
+	var i;
+	for(i := 1; i < len(thing); i := i + 1)
+		var msg := cstr( thing[i][1]+ ": " +thing[i][2] );
+		SaveToLog( msg );
+	endfor
+
+endfunction
+*/
+/*
+// DEBUG | SAVE ON GM PAGE IN CATEGORY: DEBUG
+function StaffNotify(item, page)
+
+	var curtime := CDateTimeStr2(polcore().systime+3600*3);
+	var gmpage := {"Server", page, item.serial, curtime+" x"+item.x+" y"+item.y, "Debug"};
+	var pages := getglobalproperty("gmpages");
+	if(!pages) pages := {}; endif
+	pages.append(gmpage);
+	setglobalproperty("gmpages", pages);
+
+endfunction
+*/
+/*
+// LOG | SAVE ON 'LOGFILE_PATH' CONST
+function SaveToLog(text)
+
+	// EXAMPLE: {"Hello", "WORD"} -> HELLO WORD | USE "array2string" 
+
+	var DATE := CDateStr(polcore().systime+3600*3);
+	var LOGFILE_PATH := "::log/NPC_"+DATE+".log";
+	
+	LogToFile(LOGFILE_PATH, text);
+
+endfunction
+*/
