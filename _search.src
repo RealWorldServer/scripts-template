@@ -2,6 +2,7 @@
     Maintened by *Akaki		
 	14-02-2017
 */
+```C
 use uo;
 use os;
 use file;
@@ -289,3 +290,4 @@ function SaveToLog(text)
 
 endfunction
 */
+```
